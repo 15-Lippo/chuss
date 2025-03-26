@@ -1,0 +1,17 @@
+{
+  "name": "cloud-mining",
+  "version": "1.0.0",
+  "description": "Cloud Mining Application",
+  "main": "netlify/functions/api.js",
+  "dependencies": {
+    "express": "^4.17.1",
+    "serverless-http": "^2.7.0"
+  },
+  "scripts": {
+    "build": "netlify-lambda build netlify/functions",
+    "start": "netlify-lambda serve netlify/functions"
+  },
+  "devDependencies": {
+    "netlify-lambda": "^2.0.15"
+  }
+}
