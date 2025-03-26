@@ -1,9 +1,10 @@
 [build]
-command = "pip install -r requirements.txt && gunicorn app:app"
+command = "./build.sh"
 publish = "."
 
 [build.environment]
-PYTHON_VERSION = "3.9"
+PYTHON_VERSION = "3.9.0"
+PIP_VERSION = "21.1.2"
 
 [functions]
 directory = "routes"
