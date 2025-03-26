@@ -1,0 +1,119 @@
+from flask import Blueprint, request, jsonify
+from flask_login import login_required, current_user
+from models import db, MiningSession, MiningPool, Wallet
+from datetime import datetime
+import psutil
+
+mining_bp = Blueprint('mining', __name__)
+
+@mining_bp.route('/pools', methods=['GET'])
+@login_required
+def list_pools():
+    pools = MiningPool.query.filter_by(status='active').all()
+    return jsonify([
+        {
+            'id': pool.id,
+            'name': pool.name,
+            'algorithm': pool.algorithm,
+            'fee': pool.fee,
+            'status': pool.status
+        } for pool in pools
+    ])
+
+@mining_bp.route('/start', methods=['POST'])
+@login_required
+def start_mining():
+    data = request.get_json()
+    
+    if 'pool_id' not in data:
+        return jsonify({'error': 'Pool ID is required'}), 400
+    
+    pool = MiningPool.query.get(data['pool_id'])
+    if not pool:
+        return jsonify({'error': 'Invalid pool ID'}), 404
+    
+    active_session = MiningSession.query.filter_by(
+        user_id=current_user.id,
+        status='active'
+    ).first()
+    
+    if active_session:
+        return jsonify({'error': 'Active mining session already exists'}), 400
+    
+    session = MiningSession(
+        user_id=current_user.id,
+        pool_id=pool.id,
+        hashrate=0.0,
+        status='active'
+    )
+    
+    db.session.add(session)
+    db.session.commit()
+    
+    return jsonify({
+        'message': 'Mining session started',
+        'session_id': session.id
+    })
+
+@mining_bp.route('/stop/<int:session_id>', methods=['POST'])
+@login_required
+def stop_mining(session_id):
+    session = MiningSession.query.get(session_id)
+    
+    if not session:
+        return jsonify({'error': 'Session not found'}), 404
+    
+    if session.user_id != current_user.id:
+        return jsonify({'error': 'Unauthorized'}), 403
+    
+    session.status = 'stopped'
+    session.end_time = datetime.utcnow()
+    db.session.commit()
+    
+    return jsonify({'message': 'Mining session stopped'})
+
+@mining_bp.route('/status/<int:session_id>')
+@login_required
+def session_status(session_id):
+    session = MiningSession.query.get(session_id)
+    
+    if not session:
+        return jsonify({'error': 'Session not found'}), 404
+    
+    if session.user_id != current_user.id:
+        return jsonify({'error': 'Unauthorized'}), 403
+    
+    # Simulate mining metrics
+    cpu_percent = psutil.cpu_percent()
+    memory_percent = psutil.virtual_memory().percent
+    
+    return jsonify({
+        'session_id': session.id,
+        'status': session.status,
+        'hashrate': session.hashrate,
+        'start_time': session.start_time.isoformat(),
+        'end_time': session.end_time.isoformat() if session.end_time else None,
+        'metrics': {
+            'cpu_usage': cpu_percent,
+            'memory_usage': memory_percent
+        }
+    })
+
+@mining_bp.route('/earnings')
+@login_required
+def get_earnings():
+    wallet = Wallet.query.filter_by(user_id=current_user.id).first()
+    
+    if not wallet:
+        return jsonify({'error': 'No wallet found'}), 404
+    
+    total_sessions = MiningSession.query.filter_by(
+        user_id=current_user.id,
+        status='stopped'
+    ).count()
+    
+    return jsonify({
+        'wallet_balance': wallet.balance,
+        'currency': wallet.currency,
+        'total_sessions': total_sessions
+    })
