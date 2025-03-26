@@ -1,0 +1,156 @@
+from flask import Blueprint, request, jsonify
+from flask_login import login_required, current_user
+from models import db, Wallet, Transaction, MiningPool
+from datetime import datetime
+import secrets
+
+api_bp = Blueprint('api', __name__)
+
+@api_bp.route('/wallet', methods=['POST'])
+@login_required
+def create_wallet():
+    data = request.get_json()
+    
+    if 'currency' not in data:
+        return jsonify({'error': 'Currency is required'}), 400
+    
+    existing_wallet = Wallet.query.filter_by(
+        user_id=current_user.id,
+        currency=data['currency']
+    ).first()
+    
+    if existing_wallet:
+        return jsonify({'error': f'Wallet for {data["currency"]} already exists'}), 400
+    
+    wallet = Wallet(
+        address=f'0x{secrets.token_hex(20)}',
+        currency=data['currency'],
+        user_id=current_user.id
+    )
+    
+    db.session.add(wallet)
+    db.session.commit()
+    
+    return jsonify({
+        'message': 'Wallet created successfully',
+        'wallet': {
+            'id': wallet.id,
+            'address': wallet.address,
+            'balance': wallet.balance,
+            'currency': wallet.currency
+        }
+    }), 201
+
+@api_bp.route('/wallet/<int:wallet_id>/deposit', methods=['POST'])
+@login_required
+def deposit():
+    data = request.get_json()
+    
+    if not all(k in data for k in ['amount', 'tx_hash']):
+        return jsonify({'error': 'Amount and transaction hash are required'}), 400
+    
+    wallet = Wallet.query.get(wallet_id)
+    if not wallet or wallet.user_id != current_user.id:
+        return jsonify({'error': 'Wallet not found'}), 404
+    
+    transaction = Transaction(
+        amount=data['amount'],
+        transaction_type='deposit',
+        wallet_id=wallet.id,
+        tx_hash=data['tx_hash']
+    )
+    
+    wallet.balance += data['amount']
+    
+    db.session.add(transaction)
+    db.session.commit()
+    
+    return jsonify({
+        'message': 'Deposit successful',
+        'new_balance': wallet.balance
+    })
+
+@api_bp.route('/wallet/<int:wallet_id>/withdraw', methods=['POST'])
+@login_required
+def withdraw(wallet_id):
+    data = request.get_json()
+    
+    if 'amount' not in data:
+        return jsonify({'error': 'Amount is required'}), 400
+    
+    wallet = Wallet.query.get(wallet_id)
+    if not wallet or wallet.user_id != current_user.id:
+        return jsonify({'error': 'Wallet not found'}), 404
+    
+    if wallet.balance < data['amount']:
+        return jsonify({'error': 'Insufficient balance'}), 400
+    
+    transaction = Transaction(
+        amount=data['amount'],
+        transaction_type='withdraw',
+        wallet_id=wallet.id,
+        tx_hash=f'0x{secrets.token_hex(32)}'
+    )
+    
+    wallet.balance -= data['amount']
+    
+    db.session.add(transaction)
+    db.session.commit()
+    
+    return jsonify({
+        'message': 'Withdrawal initiated',
+        'transaction': {
+            'id': transaction.id,
+            'amount': transaction.amount,
+            'tx_hash': transaction.tx_hash
+        }
+    })
+
+@api_bp.route('/transactions')
+@login_required
+def get_transactions():
+    wallet = Wallet.query.filter_by(user_id=current_user.id).first()
+    if not wallet:
+        return jsonify({'error': 'No wallet found'}), 404
+    
+    transactions = Transaction.query.filter_by(wallet_id=wallet.id)\
+        .order_by(Transaction.timestamp.desc()).all()
+    
+    return jsonify([
+        {
+            'id': tx.id,
+            'amount': tx.amount,
+            'type': tx.transaction_type,
+            'status': tx.status,
+            'timestamp': tx.timestamp.isoformat(),
+            'tx_hash': tx.tx_hash
+        } for tx in transactions
+    ])
+
+@api_bp.route('/mining-pools', methods=['POST'])
+@login_required
+def create_pool():
+    data = request.get_json()
+    
+    if not all(k in data for k in ['name', 'url', 'algorithm']):
+        return jsonify({'error': 'Missing required fields'}), 400
+    
+    pool = MiningPool(
+        name=data['name'],
+        url=data['url'],
+        algorithm=data['algorithm'],
+        fee=data.get('fee', 0.0)
+    )
+    
+    db.session.add(pool)
+    db.session.commit()
+    
+    return jsonify({
+        'message': 'Mining pool created',
+        'pool': {
+            'id': pool.id,
+            'name': pool.name,
+            'algorithm': pool.algorithm,
+            'fee': pool.fee
+        }
+    }), 201
